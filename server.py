@@ -1,5 +1,3 @@
-# server.py
-
 import socket
 import time
 
