@@ -3,7 +3,8 @@ import socket
 import threading
 import time
 from datetime import datetime
-import queue
+from collections import deque
+from threading import Lock
 
 # Configuração da página Streamlit
 st.set_page_config(page_title="Receptor de Mensagens", page_icon="📨")
@@ -14,20 +15,21 @@ st.title("📨 Receptor de Mensagens")
 # Variáveis globais
 HOST = 'localhost'
 PORT = 5001
+mensagens_pendentes = deque()
+lock = Lock()
 
 # Inicialização do estado
 if 'mensagens' not in st.session_state:
     st.session_state['mensagens'] = []
-if 'fila_mensagens' not in st.session_state:
-    st.session_state['fila_mensagens'] = queue.Queue()
 if 'status' not in st.session_state:
     st.session_state['status'] = "🟢 Servidor ativo"
 
 def adicionar_mensagem(msg):
-    """Adiciona mensagem à fila para processamento"""
+    """Adiciona mensagem à fila global"""
     if msg != "teste_conexao":  # Ignora mensagens de teste de conexão
         timestamp = datetime.now().strftime("%H:%M:%S")
-        st.session_state['fila_mensagens'].put(f"[{timestamp}] {msg}")
+        with lock:
+            mensagens_pendentes.append(f"[{timestamp}] {msg}")
 
 def receber_mensagens():
     """Função que roda em thread separada para receber mensagens"""
@@ -62,11 +64,12 @@ def receber_mensagens():
 # Status do servidor
 st.write(st.session_state.get('status', ""))
 
-# Processar mensagens da fila
-while not st.session_state['fila_mensagens'].empty():
-    msg = st.session_state['fila_mensagens'].get()
-    if msg not in st.session_state['mensagens']:
-        st.session_state['mensagens'].append(msg)
+# Processar mensagens pendentes
+with lock:
+    while mensagens_pendentes:
+        msg = mensagens_pendentes.popleft()
+        if msg not in st.session_state['mensagens']:
+            st.session_state['mensagens'].append(msg)
 
 # Container para mensagens com scroll
 with st.container():
@@ -82,6 +85,8 @@ col1, col2 = st.columns(2)
 with col1:
     if st.button("🗑️ Limpar Mensagens"):
         st.session_state['mensagens'] = []
+        with lock:
+            mensagens_pendentes.clear()
         st.rerun()
 with col2:
     if st.button("🔄 Atualizar"):
@@ -94,5 +99,5 @@ if 'receiver_thread' not in st.session_state:
     st.session_state['receiver_thread'] = receiver_thread
 
 # Atualização automática mais frequente
-time.sleep(0.5)
+time.sleep(0.1)  # Reduzindo o tempo de atualização
 st.rerun() 
