@@ -17,6 +17,19 @@ HOST = 'localhost'
 PORT = 5001
 TEMP_FILE = "mensagens_temp.json"
 
+# Função para limpar todas as mensagens
+def limpar_mensagens():
+    """Limpa todas as mensagens do sistema"""
+    # Limpar session state
+    st.session_state['mensagens'] = []
+    # Limpar arquivo temporário
+    try:
+        if os.path.exists(TEMP_FILE):
+            os.remove(TEMP_FILE)
+        print("Todas as mensagens foram limpas")
+    except Exception as e:
+        print(f"Erro ao limpar mensagens: {e}")
+
 # Inicialização do estado
 if 'mensagens' not in st.session_state:
     st.session_state['mensagens'] = []
@@ -30,7 +43,7 @@ def carregar_mensagens_temp():
             with open(TEMP_FILE, 'r') as f:
                 return json.load(f)
     except Exception:
-        pass
+        return []
     return []
 
 def salvar_mensagem_temp(msg):
@@ -87,10 +100,9 @@ st.write(st.session_state.get('status', ""))
 # Processar mensagens pendentes
 mensagens_temp = carregar_mensagens_temp()
 if mensagens_temp:
-    st.session_state['mensagens'].extend([m for m in mensagens_temp if m not in st.session_state['mensagens']])
-    # Limpar arquivo temporário após processar
-    with open(TEMP_FILE, 'w') as f:
-        json.dump([], f)
+    novas_mensagens = [m for m in mensagens_temp if m not in st.session_state['mensagens']]
+    if novas_mensagens:
+        st.session_state['mensagens'].extend(novas_mensagens)
 
 # Container para mensagens com scroll
 with st.container():
@@ -105,9 +117,7 @@ with st.container():
 col1, col2 = st.columns(2)
 with col1:
     if st.button("🗑️ Limpar Mensagens"):
-        st.session_state['mensagens'] = []
-        if os.path.exists(TEMP_FILE):
-            os.remove(TEMP_FILE)
+        limpar_mensagens()
         st.rerun()
 with col2:
     if st.button("🔄 Atualizar"):
