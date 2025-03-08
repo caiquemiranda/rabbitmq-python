@@ -3,8 +3,8 @@ import socket
 import threading
 import time
 from datetime import datetime
-from collections import deque
-from threading import Lock
+import json
+import os
 
 # Configuração da página Streamlit
 st.set_page_config(page_title="Receptor de Mensagens", page_icon="📨")
@@ -15,8 +15,7 @@ st.title("📨 Receptor de Mensagens")
 # Variáveis globais
 HOST = 'localhost'
 PORT = 5001
-mensagens_pendentes = deque()
-lock = Lock()
+TEMP_FILE = "mensagens_temp.json"
 
 # Inicialização do estado
 if 'mensagens' not in st.session_state:
@@ -24,12 +23,33 @@ if 'mensagens' not in st.session_state:
 if 'status' not in st.session_state:
     st.session_state['status'] = "🟢 Servidor ativo"
 
+def carregar_mensagens_temp():
+    """Carrega mensagens do arquivo temporário"""
+    try:
+        if os.path.exists(TEMP_FILE):
+            with open(TEMP_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def salvar_mensagem_temp(msg):
+    """Salva mensagem no arquivo temporário"""
+    try:
+        mensagens = carregar_mensagens_temp()
+        mensagens.append(msg)
+        with open(TEMP_FILE, 'w') as f:
+            json.dump(mensagens, f)
+    except Exception as e:
+        print(f"Erro ao salvar mensagem: {e}")
+
 def adicionar_mensagem(msg):
-    """Adiciona mensagem à fila global"""
+    """Adiciona mensagem ao sistema"""
     if msg != "teste_conexao":  # Ignora mensagens de teste de conexão
         timestamp = datetime.now().strftime("%H:%M:%S")
-        with lock:
-            mensagens_pendentes.append(f"[{timestamp}] {msg}")
+        mensagem_formatada = f"[{timestamp}] {msg}"
+        salvar_mensagem_temp(mensagem_formatada)
+        print(f"Mensagem salva: {mensagem_formatada}")
 
 def receber_mensagens():
     """Função que roda em thread separada para receber mensagens"""
@@ -65,11 +85,12 @@ def receber_mensagens():
 st.write(st.session_state.get('status', ""))
 
 # Processar mensagens pendentes
-with lock:
-    while mensagens_pendentes:
-        msg = mensagens_pendentes.popleft()
-        if msg not in st.session_state['mensagens']:
-            st.session_state['mensagens'].append(msg)
+mensagens_temp = carregar_mensagens_temp()
+if mensagens_temp:
+    st.session_state['mensagens'].extend([m for m in mensagens_temp if m not in st.session_state['mensagens']])
+    # Limpar arquivo temporário após processar
+    with open(TEMP_FILE, 'w') as f:
+        json.dump([], f)
 
 # Container para mensagens com scroll
 with st.container():
@@ -85,8 +106,8 @@ col1, col2 = st.columns(2)
 with col1:
     if st.button("🗑️ Limpar Mensagens"):
         st.session_state['mensagens'] = []
-        with lock:
-            mensagens_pendentes.clear()
+        if os.path.exists(TEMP_FILE):
+            os.remove(TEMP_FILE)
         st.rerun()
 with col2:
     if st.button("🔄 Atualizar"):
@@ -99,5 +120,5 @@ if 'receiver_thread' not in st.session_state:
     st.session_state['receiver_thread'] = receiver_thread
 
 # Atualização automática mais frequente
-time.sleep(0.1)  # Reduzindo o tempo de atualização
+time.sleep(0.1)
 st.rerun() 
