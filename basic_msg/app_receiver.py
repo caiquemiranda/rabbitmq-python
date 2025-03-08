@@ -46,4 +46,4 @@ if st.button("Limpar Mensagens"):
 
 # Atualizar a página automaticamente
 time.sleep(1)
-st.experimental_rerun() 
+st.rerun() 
