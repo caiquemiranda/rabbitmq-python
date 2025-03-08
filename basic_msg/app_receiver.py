@@ -3,8 +3,12 @@ import socket
 import threading
 import time
 from datetime import datetime
-import json
+import sqlite3
 import os
+
+# Força limpeza do cache do Streamlit
+st.cache_data.clear()
+st.cache_resource.clear()
 
 # Configuração da página Streamlit
 st.set_page_config(page_title="Receptor de Mensagens", page_icon="📨")
@@ -15,63 +19,89 @@ st.title("📨 Receptor de Mensagens")
 # Variáveis globais
 HOST = 'localhost'
 PORT = 5001
-TEMP_FILE = "mensagens_temp.json"
+DB_FILE = "mensagens.db"
 
-# Função para limpar todas as mensagens
-def limpar_mensagens():
-    """Limpa todas as mensagens do sistema"""
-    # Limpar todos os estados relacionados a mensagens
-    for key in list(st.session_state.keys()):
-        if key in ['mensagens', 'fila_mensagens']:
-            del st.session_state[key]
-    
-    # Limpar arquivo temporário
+def limpar_todo_sistema():
+    """Limpa todo o sistema de mensagens"""
     try:
-        if os.path.exists(TEMP_FILE):
-            os.remove(TEMP_FILE)
-        # Criar arquivo vazio
-        with open(TEMP_FILE, 'w') as f:
-            json.dump([], f)
-        print("Sistema de mensagens reinicializado")
+        # 1. Limpa o banco de dados
+        if os.path.exists(DB_FILE):
+            os.remove(DB_FILE)
+        
+        # 2. Limpa o cache do Streamlit
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        
+        # 3. Limpa todas as variáveis de sessão
+        for key in list(st.session_state.keys()):
+            if key != 'receiver_thread':  # Mantém apenas a thread do receptor
+                del st.session_state[key]
+        
+        # 4. Reinicializa o banco de dados
+        init_db()
+        
+        return True
     except Exception as e:
-        print(f"Erro ao limpar mensagens: {e}")
+        print(f"Erro ao limpar sistema: {e}")
+        return False
+
+def init_db():
+    """Inicializa o banco de dados"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS mensagens
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    mensagem TEXT)''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Erro ao inicializar DB: {e}")
+
+def adicionar_mensagem_db(msg):
+    """Adiciona mensagem ao banco de dados"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        c.execute("INSERT INTO mensagens (timestamp, mensagem) VALUES (?, ?)",
+                (timestamp, msg))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Erro ao adicionar mensagem: {e}")
+
+@st.cache_data(ttl=0.1)  # Cache com tempo de vida muito curto
+def carregar_mensagens_db():
+    """Carrega mensagens do banco de dados"""
+    try:
+        if not os.path.exists(DB_FILE):
+            return []
+        
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("SELECT timestamp, mensagem FROM mensagens ORDER BY id DESC")
+        mensagens = [f"[{ts}] {msg}" for ts, msg in c.fetchall()]
+        conn.close()
+        return mensagens
+    except Exception as e:
+        print(f"Erro ao carregar mensagens: {e}")
+        return []
+
+# Inicialização do sistema
+if not os.path.exists(DB_FILE):
+    init_db()
 
 # Inicialização do estado
-if 'mensagens' not in st.session_state:
-    st.session_state['mensagens'] = []
 if 'status' not in st.session_state:
     st.session_state['status'] = "🟢 Servidor ativo"
-if 'ultima_limpeza' not in st.session_state:
-    st.session_state['ultima_limpeza'] = time.time()
-
-def carregar_mensagens_temp():
-    """Carrega mensagens do arquivo temporário"""
-    try:
-        if os.path.exists(TEMP_FILE):
-            with open(TEMP_FILE, 'r') as f:
-                return json.load(f)
-    except Exception:
-        return []
-    return []
-
-def salvar_mensagem_temp(msg):
-    """Salva mensagem no arquivo temporário"""
-    try:
-        mensagens = carregar_mensagens_temp()
-        if msg not in mensagens:  # Evita duplicatas
-            mensagens.append(msg)
-            with open(TEMP_FILE, 'w') as f:
-                json.dump(mensagens, f)
-    except Exception as e:
-        print(f"Erro ao salvar mensagem: {e}")
 
 def adicionar_mensagem(msg):
     """Adiciona mensagem ao sistema"""
     if msg != "teste_conexao":  # Ignora mensagens de teste de conexão
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        mensagem_formatada = f"[{timestamp}] {msg}"
-        salvar_mensagem_temp(mensagem_formatada)
-        print(f"Mensagem salva: {mensagem_formatada}")
+        adicionar_mensagem_db(msg)
+        print(f"Mensagem salva: {msg}")
 
 def receber_mensagens():
     """Função que roda em thread separada para receber mensagens"""
@@ -106,32 +136,28 @@ def receber_mensagens():
 # Status do servidor
 st.write(st.session_state.get('status', ""))
 
-# Processar mensagens pendentes
-if time.time() - st.session_state['ultima_limpeza'] > 0.5:  # Evita processamento muito frequente
-    mensagens_temp = carregar_mensagens_temp()
-    if mensagens_temp:
-        st.session_state['mensagens'] = mensagens_temp.copy()  # Usa cópia direta do arquivo
-    st.session_state['ultima_limpeza'] = time.time()
-
 # Container para mensagens com scroll
 with st.container():
-    # Área de mensagens
-    if len(st.session_state['mensagens']) == 0:
+    # Carregar e exibir mensagens do banco de dados
+    mensagens = carregar_mensagens_db()
+    if not mensagens:
         st.info("Aguardando mensagens... (Servidor na porta 5001)")
     else:
-        for msg in reversed(st.session_state['mensagens']):
+        for msg in mensagens:
             st.text(msg)
 
 # Botões de controle em colunas
 col1, col2 = st.columns(2)
 with col1:
     if st.button("🗑️ Limpar Mensagens"):
-        limpar_mensagens()
-        st.session_state['mensagens'] = []  # Garante que as mensagens sejam limpas
-        time.sleep(0.1)  # Pequena pausa para garantir a limpeza
-        st.rerun()
+        if limpar_todo_sistema():
+            st.cache_data.clear()  # Limpa o cache novamente
+            st.success("Sistema completamente limpo!")
+            time.sleep(0.1)
+            st.rerun()
 with col2:
     if st.button("🔄 Atualizar"):
+        st.cache_data.clear()  # Limpa o cache antes de atualizar
         st.rerun()
 
 # Iniciar thread de recebimento
@@ -140,6 +166,7 @@ if 'receiver_thread' not in st.session_state:
     receiver_thread.start()
     st.session_state['receiver_thread'] = receiver_thread
 
-# Atualização automática mais frequente
+# Atualização automática com limpeza de cache
+st.cache_data.clear()
 time.sleep(0.1)
 st.rerun() 
