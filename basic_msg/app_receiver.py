@@ -61,7 +61,6 @@ def adicionar_mensagem_db(msg):
         conn.commit()
         conn.close()
         print(f"Mensagem salva no DB: [{timestamp}] {msg}")
-        st.session_state['display_messages'] = True
     except Exception as e:
         print(f"Erro ao adicionar mensagem: {e}")
 
@@ -90,10 +89,6 @@ def limpar_mensagens():
         
         # Reinicializa o banco
         init_db()
-        
-        # Reseta os estados
-        st.session_state['session_uuid'] = str(uuid.uuid4())
-        st.session_state['display_messages'] = False
         
         print("Sistema de mensagens limpo")
         return True
@@ -142,25 +137,20 @@ st.caption(f"ID da Sessão: {st.session_state['session_uuid'][:8]}")
 # Container para mensagens com scroll
 mensagens_container = st.empty()
 with mensagens_container.container():
-    if st.session_state['display_messages']:
-        mensagens = carregar_mensagens_db()
-        if not mensagens:
-            st.info("Aguardando mensagens... (Servidor na porta 5001)")
-        else:
-            for msg in mensagens:
-                st.text(msg)
+    mensagens = carregar_mensagens_db()
+    if not mensagens:
+        st.info("Aguardando mensagens...")
     else:
-        st.info("Conversa limpa. Aguardando novas mensagens...")
+        for msg in mensagens:
+            st.text(msg)
 
-# Botões de controle em colunas
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("🗑️ Limpar Mensagens"):
-        if limpar_mensagens():
-            mensagens_container.empty()
-            st.success("Conversa limpa com sucesso!")
-            st.query_params["session"] = st.session_state['session_uuid']
-            st.rerun()
+# Botão de limpar
+if st.button("🗑️ Limpar Conversa"):
+    if limpar_mensagens():
+        mensagens_container.empty()
+        st.success("Conversa limpa com sucesso!")
+        st.session_state['session_uuid'] = str(uuid.uuid4())
+        st.rerun()
 
 # Iniciar thread de recebimento
 if 'receiver_thread' not in st.session_state:
