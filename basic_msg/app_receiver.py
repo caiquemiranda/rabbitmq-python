@@ -7,15 +7,86 @@ import sqlite3
 import os
 import uuid
 
-# Força limpeza do cache do Streamlit
-st.cache_data.clear()
-st.cache_resource.clear()
+# Configuração da página Streamlit com tema escuro
+st.set_page_config(
+    page_title="Terminal de Mensagens",
+    page_icon="🖥️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# Configuração da página Streamlit
-st.set_page_config(page_title="Receptor de Mensagens", page_icon="📨")
+# CSS personalizado para o tema hacker
+st.markdown("""
+<style>
+    /* Tema escuro personalizado */
+    .stApp {
+        background-color: #0a0a0a;
+        color: #00ff00;
+    }
+    
+    /* Estilo para títulos */
+    .title-text {
+        color: #00ff00;
+        font-family: 'Courier New', monospace;
+        text-shadow: 0 0 10px #00ff00;
+        padding: 20px;
+        background-color: #111111;
+        border: 1px solid #00ff00;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    
+    /* Estilo para mensagens */
+    .terminal-text {
+        font-family: 'Courier New', monospace;
+        color: #00ff00;
+        background-color: #0a0a0a;
+        padding: 5px 10px;
+        border-left: 2px solid #00ff00;
+        margin: 5px 0;
+    }
+    
+    /* Estilo para o status */
+    .status-text {
+        color: #00ff00;
+        font-family: 'Courier New', monospace;
+        font-size: 0.8em;
+        opacity: 0.8;
+    }
+    
+    /* Estilo para botões */
+    .stButton button {
+        background-color: #0a0a0a !important;
+        color: #00ff00 !important;
+        border: 1px solid #00ff00 !important;
+        font-family: 'Courier New', monospace !important;
+        text-shadow: 0 0 5px #00ff00;
+    }
+    
+    .stButton button:hover {
+        background-color: #00ff00 !important;
+        color: #0a0a0a !important;
+        border: 1px solid #00ff00 !important;
+    }
+    
+    /* Estilo para mensagens de info */
+    .stInfo {
+        background-color: #111111 !important;
+        color: #00ff00 !important;
+        border: 1px solid #00ff00 !important;
+    }
+    
+    /* Estilo para mensagens de sucesso */
+    .stSuccess {
+        background-color: #111111 !important;
+        color: #00ff00 !important;
+        border: 1px solid #00ff00 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Configuração do layout
-st.title("📨 Receptor de Mensagens")
+# Título com estilo hacker
+st.markdown('<h1 class="title-text">_TERMINAL DE MENSAGENS_</h1>', unsafe_allow_html=True)
 
 # Variáveis globais
 HOST = 'localhost'
@@ -25,16 +96,6 @@ DB_FILE = "mensagens.db"
 # Inicialização dos estados
 if 'session_uuid' not in st.session_state:
     st.session_state['session_uuid'] = str(uuid.uuid4())
-if 'display_messages' not in st.session_state:
-    st.session_state['display_messages'] = True
-
-# Parâmetros de URL para controle de estado
-if "clear" in st.query_params:
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-        init_db()
-    st.session_state['display_messages'] = False
-    st.query_params.clear()
 
 def init_db():
     """Inicializa o banco de dados"""
@@ -73,7 +134,7 @@ def carregar_mensagens_db():
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("SELECT timestamp, mensagem FROM mensagens ORDER BY id DESC")
-        mensagens = [f"[{ts}] {msg}" for ts, msg in c.fetchall()]
+        mensagens = [f"[{ts}] > {msg}" for ts, msg in c.fetchall()]
         conn.close()
         return mensagens
     except Exception as e:
@@ -83,13 +144,9 @@ def carregar_mensagens_db():
 def limpar_mensagens():
     """Limpa todas as mensagens"""
     try:
-        # Remove o arquivo do banco de dados
         if os.path.exists(DB_FILE):
             os.remove(DB_FILE)
-        
-        # Reinicializa o banco
         init_db()
-        
         print("Sistema de mensagens limpo")
         return True
     except Exception as e:
@@ -115,7 +172,7 @@ def receber_mensagens():
                     data = conn.recv(1024)
                     if data:
                         mensagem = data.decode('utf-8')
-                        if mensagem != "teste_conexao":  # Ignora mensagens de teste
+                        if mensagem != "teste_conexao":
                             print(f"Mensagem recebida: {mensagem}")
                             adicionar_mensagem_db(mensagem)
             except Exception as e:
@@ -130,27 +187,31 @@ def receber_mensagens():
 if not os.path.exists(DB_FILE):
     init_db()
 
-# Status do servidor
-st.write("🟢 Servidor ativo")
-st.caption(f"ID da Sessão: {st.session_state['session_uuid'][:8]}")
+# Status do servidor com estilo hacker
+st.markdown(
+    f'<div class="status-text">[SISTEMA: ONLINE] - ID: {st.session_state["session_uuid"][:8]}</div>',
+    unsafe_allow_html=True
+)
 
 # Container para mensagens com scroll
 mensagens_container = st.empty()
 with mensagens_container.container():
     mensagens = carregar_mensagens_db()
     if not mensagens:
-        st.info("Aguardando mensagens...")
+        st.info("_Aguardando transmissão de dados..._")
     else:
         for msg in mensagens:
-            st.text(msg)
+            st.markdown(f'<div class="terminal-text">{msg}</div>', unsafe_allow_html=True)
 
-# Botão de limpar
-if st.button("🗑️ Limpar Conversa"):
-    if limpar_mensagens():
-        mensagens_container.empty()
-        st.success("Conversa limpa com sucesso!")
-        st.session_state['session_uuid'] = str(uuid.uuid4())
-        st.rerun()
+# Botão de limpar com estilo hacker
+col1, col2, col3 = st.columns([1,2,1])
+with col2:
+    if st.button("⚡ LIMPAR TERMINAL ⚡"):
+        if limpar_mensagens():
+            mensagens_container.empty()
+            st.success("_Terminal reinicializado com sucesso_")
+            st.session_state['session_uuid'] = str(uuid.uuid4())
+            st.rerun()
 
 # Iniciar thread de recebimento
 if 'receiver_thread' not in st.session_state:
