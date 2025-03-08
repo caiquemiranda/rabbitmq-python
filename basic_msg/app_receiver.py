@@ -82,6 +82,44 @@ st.markdown("""
         color: #00ff00 !important;
         border: 1px solid #00ff00 !important;
     }
+
+    /* Estilo para o campo de texto */
+    .stTextInput input {
+        background-color: #111111 !important;
+        color: #00ff00 !important;
+        border: 1px solid #00ff00 !important;
+        font-family: 'Courier New', monospace !important;
+        padding: 10px !important;
+    }
+    
+    .stTextInput input:focus {
+        box-shadow: 0 0 10px #00ff00 !important;
+    }
+
+    /* Container de mensagens com scroll */
+    .messages-container {
+        height: 60vh;
+        overflow-y: auto;
+        padding: 20px;
+        background-color: #0a0a0a;
+        border: 1px solid #00ff00;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+
+    /* Barra de rolagem personalizada */
+    .messages-container::-webkit-scrollbar {
+        width: 5px;
+    }
+    
+    .messages-container::-webkit-scrollbar-track {
+        background: #0a0a0a;
+    }
+    
+    .messages-container::-webkit-scrollbar-thumb {
+        background: #00ff00;
+        border-radius: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,6 +135,31 @@ DB_FILE = "mensagens.db"
 if 'session_uuid' not in st.session_state:
     st.session_state['session_uuid'] = str(uuid.uuid4())
 
+def enviar_mensagem_socket(mensagem):
+    """Envia mensagem via socket"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((HOST, PORT))
+            s.sendall(mensagem.encode())
+        return True
+    except Exception as e:
+        print(f"Erro ao enviar mensagem: {e}")
+        return False
+
+def adicionar_mensagem_db(msg, origem="recebida"):
+    """Adiciona mensagem ao banco de dados"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        c.execute("INSERT INTO mensagens (timestamp, mensagem, origem) VALUES (?, ?, ?)",
+                (timestamp, msg, origem))
+        conn.commit()
+        conn.close()
+        print(f"Mensagem salva no DB: [{timestamp}] {msg}")
+    except Exception as e:
+        print(f"Erro ao adicionar mensagem: {e}")
+
 def init_db():
     """Inicializa o banco de dados"""
     try:
@@ -105,25 +168,12 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS mensagens
                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT,
-                    mensagem TEXT)''')
+                    mensagem TEXT,
+                    origem TEXT)''')
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"Erro ao inicializar DB: {e}")
-
-def adicionar_mensagem_db(msg):
-    """Adiciona mensagem ao banco de dados"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        c.execute("INSERT INTO mensagens (timestamp, mensagem) VALUES (?, ?)",
-                (timestamp, msg))
-        conn.commit()
-        conn.close()
-        print(f"Mensagem salva no DB: [{timestamp}] {msg}")
-    except Exception as e:
-        print(f"Erro ao adicionar mensagem: {e}")
 
 def carregar_mensagens_db():
     """Carrega mensagens do banco de dados"""
@@ -133,8 +183,13 @@ def carregar_mensagens_db():
         
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("SELECT timestamp, mensagem FROM mensagens ORDER BY id DESC")
-        mensagens = [f"[{ts}] > {msg}" for ts, msg in c.fetchall()]
+        c.execute("SELECT timestamp, mensagem, origem FROM mensagens ORDER BY id DESC")
+        mensagens = []
+        for ts, msg, origem in c.fetchall():
+            if origem == "local":
+                mensagens.append(f"[{ts}] << {msg}")  # Mensagens locais com <<
+            else:
+                mensagens.append(f"[{ts}] >> {msg}")  # Mensagens recebidas com >>
         conn.close()
         return mensagens
     except Exception as e:
@@ -174,7 +229,7 @@ def receber_mensagens():
                         mensagem = data.decode('utf-8')
                         if mensagem != "teste_conexao":
                             print(f"Mensagem recebida: {mensagem}")
-                            adicionar_mensagem_db(mensagem)
+                            adicionar_mensagem_db(mensagem, "recebida")
             except Exception as e:
                 print(f"Erro na conexão: {e}")
                 time.sleep(0.1)
@@ -194,21 +249,33 @@ st.markdown(
 )
 
 # Container para mensagens com scroll
-mensagens_container = st.empty()
-with mensagens_container.container():
-    mensagens = carregar_mensagens_db()
-    if not mensagens:
-        st.info("_Aguardando transmissão de dados..._")
-    else:
-        for msg in mensagens:
-            st.markdown(f'<div class="terminal-text">{msg}</div>', unsafe_allow_html=True)
+st.markdown('<div class="messages-container">', unsafe_allow_html=True)
+mensagens = carregar_mensagens_db()
+if not mensagens:
+    st.info("_Aguardando transmissão de dados..._")
+else:
+    for msg in mensagens:
+        st.markdown(f'<div class="terminal-text">{msg}</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Área de entrada de mensagem
+col1, col2 = st.columns([4, 1])
+with col1:
+    mensagem = st.text_input("", placeholder="Digite sua mensagem e pressione Enter...", key="input_msg")
+with col2:
+    if st.button("⚡ ENVIAR ⚡"):
+        if mensagem.strip():
+            # Adiciona a mensagem local ao banco
+            adicionar_mensagem_db(mensagem, "local")
+            st.session_state.input_msg = ""  # Limpa o campo após enviar
+            time.sleep(0.1)
+            st.rerun()
 
 # Botão de limpar com estilo hacker
 col1, col2, col3 = st.columns([1,2,1])
 with col2:
-    if st.button("⚡ LIMPAR TERMINAL ⚡"):
+    if st.button("🔥 LIMPAR TERMINAL 🔥"):
         if limpar_mensagens():
-            mensagens_container.empty()
             st.success("_Terminal reinicializado com sucesso_")
             st.session_state['session_uuid'] = str(uuid.uuid4())
             st.rerun()
