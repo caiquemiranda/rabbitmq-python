@@ -9,70 +9,78 @@ st.set_page_config(page_title="Receptor de Mensagens", page_icon="📨")
 
 # Configuração do layout
 st.title("📨 Receptor de Mensagens")
-st.write("Sistema ativo e aguardando mensagens...")
+
+# Variáveis globais
+HOST = 'localhost'
+PORT = 5001  # Mudando a porta para evitar conflitos
 
 # Inicialização do estado
 if 'mensagens' not in st.session_state:
     st.session_state['mensagens'] = []
-
-if 'socket_initialized' not in st.session_state:
-    st.session_state['socket_initialized'] = False
+    st.session_state['status'] = "🟢 Servidor ativo"
 
 def adicionar_mensagem(msg):
-    """Função para adicionar mensagem com timestamp"""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    st.session_state['mensagens'].append(f"[{timestamp}] {msg}")
+    with st.session_state as state:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        state['mensagens'].append(f"[{timestamp}] {msg}")
 
 def receber_mensagens():
-    HOST = 'localhost'
-    PORT = 5000
+    print("Iniciando servidor de socket...")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind((HOST, PORT))
-                s.listen()
-                
-                while True:
-                    conn, addr = s.accept()
-                    with conn:
-                        data = conn.recv(1024)
-                        if data:
-                            mensagem = data.decode()
-                            adicionar_mensagem(mensagem)
-        except Exception as e:
-            print(f"Erro no socket: {e}")
-            time.sleep(1)
+    try:
+        sock.bind((HOST, PORT))
+        sock.listen(1)
+        print(f"Servidor escutando em {HOST}:{PORT}")
+        
+        while True:
+            try:
+                conn, addr = sock.accept()
+                print(f"Conexão recebida de {addr}")
+                with conn:
+                    data = conn.recv(1024)
+                    if data:
+                        mensagem = data.decode('utf-8')
+                        print(f"Mensagem recebida: {mensagem}")
+                        adicionar_mensagem(mensagem)
+            except Exception as e:
+                print(f"Erro na conexão: {e}")
+                time.sleep(0.1)
+    except Exception as e:
+        print(f"Erro fatal no servidor: {e}")
+        st.session_state['status'] = f"🔴 Erro no servidor: {str(e)}"
+    finally:
+        sock.close()
+
+# Status do servidor
+st.write(st.session_state.get('status', ""))
 
 # Container para mensagens com scroll
-mensagens_container = st.container()
-
-# Área de mensagens
-with mensagens_container:
+with st.container():
+    # Área de mensagens
     if len(st.session_state['mensagens']) == 0:
-        st.info("Nenhuma mensagem recebida ainda...")
+        st.info("Aguardando mensagens... (Servidor na porta 5001)")
     else:
         for msg in reversed(st.session_state['mensagens']):
             st.text(msg)
 
-# Botões de controle
+# Botões de controle em colunas
 col1, col2 = st.columns(2)
 with col1:
     if st.button("🗑️ Limpar Mensagens"):
         st.session_state['mensagens'] = []
-        st.experimental_rerun()
+        st.rerun()
 with col2:
     if st.button("🔄 Atualizar"):
-        st.experimental_rerun()
+        st.rerun()
 
-# Iniciar thread de recebimento apenas uma vez
-if not st.session_state.get('socket_initialized', False):
+# Iniciar thread de recebimento
+if 'receiver_thread' not in st.session_state:
     receiver_thread = threading.Thread(target=receber_mensagens, daemon=True)
     receiver_thread.start()
-    st.session_state['socket_initialized'] = True
+    st.session_state['receiver_thread'] = receiver_thread
 
-# Configurar auto-atualização
-if len(st.session_state['mensagens']) > 0:
-    time.sleep(0.5)
-    st.rerun() 
+# Atualização automática
+time.sleep(1)
+st.rerun() 
