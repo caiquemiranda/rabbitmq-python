@@ -20,13 +20,19 @@ TEMP_FILE = "mensagens_temp.json"
 # Função para limpar todas as mensagens
 def limpar_mensagens():
     """Limpa todas as mensagens do sistema"""
-    # Limpar session state
-    st.session_state['mensagens'] = []
+    # Limpar todos os estados relacionados a mensagens
+    for key in list(st.session_state.keys()):
+        if key in ['mensagens', 'fila_mensagens']:
+            del st.session_state[key]
+    
     # Limpar arquivo temporário
     try:
         if os.path.exists(TEMP_FILE):
             os.remove(TEMP_FILE)
-        print("Todas as mensagens foram limpas")
+        # Criar arquivo vazio
+        with open(TEMP_FILE, 'w') as f:
+            json.dump([], f)
+        print("Sistema de mensagens reinicializado")
     except Exception as e:
         print(f"Erro ao limpar mensagens: {e}")
 
@@ -35,6 +41,8 @@ if 'mensagens' not in st.session_state:
     st.session_state['mensagens'] = []
 if 'status' not in st.session_state:
     st.session_state['status'] = "🟢 Servidor ativo"
+if 'ultima_limpeza' not in st.session_state:
+    st.session_state['ultima_limpeza'] = time.time()
 
 def carregar_mensagens_temp():
     """Carrega mensagens do arquivo temporário"""
@@ -50,9 +58,10 @@ def salvar_mensagem_temp(msg):
     """Salva mensagem no arquivo temporário"""
     try:
         mensagens = carregar_mensagens_temp()
-        mensagens.append(msg)
-        with open(TEMP_FILE, 'w') as f:
-            json.dump(mensagens, f)
+        if msg not in mensagens:  # Evita duplicatas
+            mensagens.append(msg)
+            with open(TEMP_FILE, 'w') as f:
+                json.dump(mensagens, f)
     except Exception as e:
         print(f"Erro ao salvar mensagem: {e}")
 
@@ -98,11 +107,11 @@ def receber_mensagens():
 st.write(st.session_state.get('status', ""))
 
 # Processar mensagens pendentes
-mensagens_temp = carregar_mensagens_temp()
-if mensagens_temp:
-    novas_mensagens = [m for m in mensagens_temp if m not in st.session_state['mensagens']]
-    if novas_mensagens:
-        st.session_state['mensagens'].extend(novas_mensagens)
+if time.time() - st.session_state['ultima_limpeza'] > 0.5:  # Evita processamento muito frequente
+    mensagens_temp = carregar_mensagens_temp()
+    if mensagens_temp:
+        st.session_state['mensagens'] = mensagens_temp.copy()  # Usa cópia direta do arquivo
+    st.session_state['ultima_limpeza'] = time.time()
 
 # Container para mensagens com scroll
 with st.container():
@@ -118,6 +127,8 @@ col1, col2 = st.columns(2)
 with col1:
     if st.button("🗑️ Limpar Mensagens"):
         limpar_mensagens()
+        st.session_state['mensagens'] = []  # Garante que as mensagens sejam limpas
+        time.sleep(0.1)  # Pequena pausa para garantir a limpeza
         st.rerun()
 with col2:
     if st.button("🔄 Atualizar"):
