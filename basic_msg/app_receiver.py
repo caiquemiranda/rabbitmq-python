@@ -135,47 +135,35 @@ DB_FILE = "mensagens.db"
 if 'session_uuid' not in st.session_state:
     st.session_state['session_uuid'] = str(uuid.uuid4())
 
-def enviar_mensagem_socket(mensagem):
-    """Envia mensagem via socket"""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((HOST, PORT))
-            s.sendall(mensagem.encode())
-        return True
-    except Exception as e:
-        print(f"Erro ao enviar mensagem: {e}")
-        return False
+def init_db():
+    """Inicializa o banco de dados"""
+    if os.path.exists(DB_FILE):
+        os.remove(DB_FILE)
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE mensagens
+                (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                mensagem TEXT,
+                local INTEGER)''')
+    conn.commit()
+    conn.close()
 
-def adicionar_mensagem_db(msg, origem="recebida"):
+def adicionar_mensagem(msg, is_local=True):
     """Adiciona mensagem ao banco de dados"""
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         timestamp = datetime.now().strftime("%H:%M:%S")
-        c.execute("INSERT INTO mensagens (timestamp, mensagem, origem) VALUES (?, ?, ?)",
-                (timestamp, msg, origem))
+        c.execute("INSERT INTO mensagens (timestamp, mensagem, local) VALUES (?, ?, ?)",
+                (timestamp, msg, 1 if is_local else 0))
         conn.commit()
         conn.close()
-        print(f"Mensagem salva no DB: [{timestamp}] {msg}")
     except Exception as e:
         print(f"Erro ao adicionar mensagem: {e}")
 
-def init_db():
-    """Inicializa o banco de dados"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS mensagens
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT,
-                    mensagem TEXT,
-                    origem TEXT)''')
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Erro ao inicializar DB: {e}")
-
-def carregar_mensagens_db():
+def carregar_mensagens():
     """Carrega mensagens do banco de dados"""
     try:
         if not os.path.exists(DB_FILE):
@@ -183,34 +171,19 @@ def carregar_mensagens_db():
         
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("SELECT timestamp, mensagem, origem FROM mensagens ORDER BY id DESC")
+        c.execute("SELECT timestamp, mensagem, local FROM mensagens ORDER BY id DESC")
         mensagens = []
-        for ts, msg, origem in c.fetchall():
-            if origem == "local":
-                mensagens.append(f"[{ts}] << {msg}")  # Mensagens locais com <<
-            else:
-                mensagens.append(f"[{ts}] >> {msg}")  # Mensagens recebidas com >>
+        for ts, msg, local in c.fetchall():
+            prefix = "<<" if local else ">>"
+            mensagens.append(f"[{ts}] {prefix} {msg}")
         conn.close()
         return mensagens
     except Exception as e:
         print(f"Erro ao carregar mensagens: {e}")
         return []
 
-def limpar_mensagens():
-    """Limpa todas as mensagens"""
-    try:
-        if os.path.exists(DB_FILE):
-            os.remove(DB_FILE)
-        init_db()
-        print("Sistema de mensagens limpo")
-        return True
-    except Exception as e:
-        print(f"Erro ao limpar mensagens: {e}")
-        return False
-
 def receber_mensagens():
-    """Função que roda em thread separada para receber mensagens"""
-    print("Iniciando servidor de socket...")
+    """Thread para receber mensagens"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
@@ -222,23 +195,20 @@ def receber_mensagens():
         while True:
             try:
                 conn, addr = sock.accept()
-                print(f"Conexão recebida de {addr}")
                 with conn:
                     data = conn.recv(1024)
                     if data:
-                        mensagem = data.decode('utf-8')
-                        if mensagem != "teste_conexao":
-                            print(f"Mensagem recebida: {mensagem}")
-                            adicionar_mensagem_db(mensagem, "recebida")
+                        msg = data.decode('utf-8')
+                        if msg != "teste_conexao":
+                            adicionar_mensagem(msg, False)
             except Exception as e:
-                print(f"Erro na conexão: {e}")
                 time.sleep(0.1)
     except Exception as e:
-        print(f"Erro fatal no servidor: {e}")
+        print(f"Erro no servidor: {e}")
     finally:
         sock.close()
 
-# Inicialização do sistema
+# Inicialização
 if not os.path.exists(DB_FILE):
     init_db()
 
@@ -250,9 +220,9 @@ st.markdown(
 
 # Container para mensagens com scroll
 st.markdown('<div class="messages-container">', unsafe_allow_html=True)
-mensagens = carregar_mensagens_db()
+mensagens = carregar_mensagens()
 if not mensagens:
-    st.info("_Aguardando transmissão de dados..._")
+    st.info("_Aguardando mensagens..._")
 else:
     for msg in mensagens:
         st.markdown(f'<div class="terminal-text">{msg}</div>', unsafe_allow_html=True)
@@ -261,24 +231,21 @@ st.markdown('</div>', unsafe_allow_html=True)
 # Área de entrada de mensagem
 col1, col2 = st.columns([4, 1])
 with col1:
-    mensagem = st.text_input("", placeholder="Digite sua mensagem e pressione Enter...", key="input_msg")
+    mensagem = st.text_input("", placeholder="Digite sua mensagem...", label_visibility="collapsed")
 with col2:
-    if st.button("⚡ ENVIAR ⚡"):
+    if st.button("⚡ ENVIAR ⚡") or mensagem:
         if mensagem.strip():
-            # Adiciona a mensagem local ao banco
-            adicionar_mensagem_db(mensagem, "local")
-            st.session_state.input_msg = ""  # Limpa o campo após enviar
-            time.sleep(0.1)
+            adicionar_mensagem(mensagem, True)
             st.rerun()
 
 # Botão de limpar com estilo hacker
 col1, col2, col3 = st.columns([1,2,1])
 with col2:
     if st.button("🔥 LIMPAR TERMINAL 🔥"):
-        if limpar_mensagens():
-            st.success("_Terminal reinicializado com sucesso_")
-            st.session_state['session_uuid'] = str(uuid.uuid4())
-            st.rerun()
+        init_db()
+        st.success("_Terminal reinicializado com sucesso_")
+        st.session_state['session_uuid'] = str(uuid.uuid4())
+        st.rerun()
 
 # Iniciar thread de recebimento
 if 'receiver_thread' not in st.session_state:
