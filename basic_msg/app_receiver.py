@@ -22,15 +22,18 @@ HOST = 'localhost'
 PORT = 5001
 DB_FILE = "mensagens.db"
 
-# Gera um ID único para a sessão se não existir
+# Inicialização dos estados
 if 'session_uuid' not in st.session_state:
     st.session_state['session_uuid'] = str(uuid.uuid4())
+if 'display_messages' not in st.session_state:
+    st.session_state['display_messages'] = True
 
 # Parâmetros de URL para controle de estado
 if "clear" in st.query_params:
     if os.path.exists(DB_FILE):
         os.remove(DB_FILE)
         init_db()
+    st.session_state['display_messages'] = False
     st.query_params.clear()
 
 def init_db():
@@ -58,6 +61,7 @@ def adicionar_mensagem_db(msg):
         conn.commit()
         conn.close()
         print(f"Mensagem salva no DB: [{timestamp}] {msg}")
+        st.session_state['display_messages'] = True
     except Exception as e:
         print(f"Erro ao adicionar mensagem: {e}")
 
@@ -87,8 +91,9 @@ def limpar_mensagens():
         # Reinicializa o banco
         init_db()
         
-        # Gera novo UUID para forçar recarregamento
+        # Reseta os estados
         st.session_state['session_uuid'] = str(uuid.uuid4())
+        st.session_state['display_messages'] = False
         
         print("Sistema de mensagens limpo")
         return True
@@ -135,45 +140,27 @@ st.write("🟢 Servidor ativo")
 st.caption(f"ID da Sessão: {st.session_state['session_uuid'][:8]}")
 
 # Container para mensagens com scroll
-with st.container():
-    # Carregar e exibir mensagens do banco de dados
-    mensagens = carregar_mensagens_db()
-    if not mensagens:
-        st.info("Aguardando mensagens... (Servidor na porta 5001)")
+mensagens_container = st.empty()
+with mensagens_container.container():
+    if st.session_state['display_messages']:
+        mensagens = carregar_mensagens_db()
+        if not mensagens:
+            st.info("Aguardando mensagens... (Servidor na porta 5001)")
+        else:
+            for msg in mensagens:
+                st.text(msg)
     else:
-        for msg in mensagens:
-            st.text(msg)
-
-# Componente HTML para recarregamento
-reload_html = f'''
-    <meta id="session-id" data-session-id="{st.session_state['session_uuid']}">
-    <script>
-        window.addEventListener('load', function() {{
-            const urlParams = new URLSearchParams(window.location.search);
-            const currentSession = document.getElementById('session-id').dataset.sessionId;
-            const urlSession = urlParams.get('session');
-            
-            if (urlSession && urlSession !== currentSession) {{
-                window.location.reload();
-            }}
-        }});
-    </script>
-'''
-st.components.v1.html(reload_html, height=0)
+        st.info("Conversa limpa. Aguardando novas mensagens...")
 
 # Botões de controle em colunas
 col1, col2 = st.columns(2)
 with col1:
     if st.button("🗑️ Limpar Mensagens"):
         if limpar_mensagens():
-            st.success("Sistema limpo com sucesso!")
-            # Adiciona novo ID de sessão na URL
+            mensagens_container.empty()
+            st.success("Conversa limpa com sucesso!")
             st.query_params["session"] = st.session_state['session_uuid']
             st.rerun()
-with col2:
-    if st.button("🔄 Atualizar"):
-        st.cache_data.clear()
-        st.rerun()
 
 # Iniciar thread de recebimento
 if 'receiver_thread' not in st.session_state:
