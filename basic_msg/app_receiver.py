@@ -3,6 +3,7 @@ import socket
 import threading
 import time
 from datetime import datetime
+import queue
 
 # Configuração da página Streamlit
 st.set_page_config(page_title="Receptor de Mensagens", page_icon="📨")
@@ -12,19 +13,24 @@ st.title("📨 Receptor de Mensagens")
 
 # Variáveis globais
 HOST = 'localhost'
-PORT = 5001  # Mudando a porta para evitar conflitos
+PORT = 5001
 
 # Inicialização do estado
 if 'mensagens' not in st.session_state:
     st.session_state['mensagens'] = []
+if 'fila_mensagens' not in st.session_state:
+    st.session_state['fila_mensagens'] = queue.Queue()
+if 'status' not in st.session_state:
     st.session_state['status'] = "🟢 Servidor ativo"
 
 def adicionar_mensagem(msg):
-    with st.session_state as state:
+    """Adiciona mensagem à fila para processamento"""
+    if msg != "teste_conexao":  # Ignora mensagens de teste de conexão
         timestamp = datetime.now().strftime("%H:%M:%S")
-        state['mensagens'].append(f"[{timestamp}] {msg}")
+        st.session_state['fila_mensagens'].put(f"[{timestamp}] {msg}")
 
 def receber_mensagens():
+    """Função que roda em thread separada para receber mensagens"""
     print("Iniciando servidor de socket...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -56,6 +62,12 @@ def receber_mensagens():
 # Status do servidor
 st.write(st.session_state.get('status', ""))
 
+# Processar mensagens da fila
+while not st.session_state['fila_mensagens'].empty():
+    msg = st.session_state['fila_mensagens'].get()
+    if msg not in st.session_state['mensagens']:
+        st.session_state['mensagens'].append(msg)
+
 # Container para mensagens com scroll
 with st.container():
     # Área de mensagens
@@ -81,6 +93,6 @@ if 'receiver_thread' not in st.session_state:
     receiver_thread.start()
     st.session_state['receiver_thread'] = receiver_thread
 
-# Atualização automática
-time.sleep(1)
+# Atualização automática mais frequente
+time.sleep(0.5)
 st.rerun() 
