@@ -100,6 +100,14 @@ st.markdown("""
     footer {
         display: none;
     }
+
+    .element-container:empty {
+        display: none;
+    }
+
+    .stMarkdown:empty {
+        display: none;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -109,10 +117,12 @@ PORT = 5001
 DB_FILE = "mensagens.db"
 
 # Inicialização do estado
-if 'ultima_msg' not in st.session_state:
-    st.session_state['ultima_msg'] = None
 if 'mensagens_cache' not in st.session_state:
     st.session_state['mensagens_cache'] = []
+if 'input_key' not in st.session_state:
+    st.session_state['input_key'] = 0
+if 'container_key' not in st.session_state:
+    st.session_state['container_key'] = 0
 
 def init_db():
     """Inicializa o banco de dados"""
@@ -128,18 +138,15 @@ def init_db():
 
 def adicionar_mensagem(msg, is_local=True):
     """Adiciona mensagem ao banco de dados"""
-    if msg == st.session_state['ultima_msg']:
-        return
-        
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        # Garante que o timestamp seja salvo no formato ISO
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         c.execute("INSERT INTO mensagens (timestamp, mensagem, local) VALUES (?, ?, ?)",
                 (timestamp, msg, 1 if is_local else 0))
         conn.commit()
         conn.close()
-        st.session_state['ultima_msg'] = msg
     except Exception as e:
         print(f"Erro ao adicionar mensagem: {e}")
 
@@ -151,18 +158,27 @@ def carregar_mensagens():
         
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("SELECT timestamp, mensagem, local FROM mensagens ORDER BY id DESC")
+        # Ordenar por ID em ordem crescente para mostrar mensagens mais antigas primeiro
+        c.execute("SELECT timestamp, mensagem, local FROM mensagens ORDER BY id ASC")
         mensagens = []
         for ts, msg, local in c.fetchall():
+            try:
+                # Tenta primeiro o formato ISO
+                data = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                try:
+                    # Tenta o formato alternativo se o primeiro falhar
+                    data = datetime.strptime(ts, "%d/%m/%Y, %H:%M:%S")
+                except ValueError:
+                    # Se ambos falharem, usa a data atual
+                    data = datetime.now()
+            
+            # Formata a data para exibição no formato DD/MM/YYYY HH:MM:SS
+            ts_formatado = data.strftime("%d/%m/%Y %H:%M:%S")
             prefix = "<<" if local else ">>"
-            mensagens.append(f"[{ts}] {prefix} {msg}")
+            mensagens.append(f"[{ts_formatado}] {prefix} {msg}")
         conn.close()
-        
-        # Verifica se as mensagens mudaram
-        if mensagens != st.session_state['mensagens_cache']:
-            st.session_state['mensagens_cache'] = mensagens
-            return mensagens
-        return []
+        return mensagens
         
     except Exception as e:
         print(f"Erro ao carregar mensagens: {e}")
@@ -171,13 +187,14 @@ def carregar_mensagens():
 def limpar_mensagens():
     """Limpa todas as mensagens"""
     try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("DELETE FROM mensagens")
-        conn.commit()
-        conn.close()
+        # Remove o arquivo do banco de dados
+        if os.path.exists(DB_FILE):
+            os.remove(DB_FILE)
+        # Reinicializa o banco
+        init_db()
+        # Limpa o cache e incrementa a key do container
         st.session_state['mensagens_cache'] = []
-        st.session_state['ultima_msg'] = None
+        st.session_state['container_key'] += 1
         return True
     except Exception as e:
         print(f"Erro ao limpar mensagens: {e}")
@@ -217,33 +234,40 @@ if not os.path.exists(DB_FILE):
 st.markdown('<h1 class="title-text">_TERMINAL DE MENSAGENS_</h1>', unsafe_allow_html=True)
 st.markdown('<div class="status-text">[SISTEMA: ONLINE]</div>', unsafe_allow_html=True)
 
-# Área de mensagens
-mensagens = carregar_mensagens()
-with st.container():
-    st.markdown('<div class="messages-container">', unsafe_allow_html=True)
-    if not st.session_state['mensagens_cache']:
+# Área de mensagens com key dinâmica
+mensagens_container = st.empty()
+with mensagens_container.container():
+    mensagens = carregar_mensagens()
+    if not mensagens:
         st.info("_Aguardando mensagens..._")
     else:
-        for msg in st.session_state['mensagens_cache']:
-            st.markdown(f'<div class="terminal-text">{msg}</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        # Cria um container único para cada conjunto de mensagens
+        with st.container():
+            for msg in mensagens:
+                st.markdown(f'<div class="terminal-text">{msg}</div>', unsafe_allow_html=True)
 
 # Área de entrada
 col1, col2 = st.columns([4, 1])
 with col1:
-    mensagem = st.text_input("", placeholder="Digite sua mensagem...", label_visibility="collapsed")
+    # Incrementa a key do input para forçar limpeza
+    key = f"msg_input_{st.session_state['input_key']}"
+    mensagem = st.text_input("Mensagem", value="", key=key, label_visibility="collapsed")
+
 with col2:
-    if st.button("⚡ ENVIAR ⚡"):
-        if mensagem.strip():
-            adicionar_mensagem(mensagem, True)
-            time.sleep(0.1)
-            st.rerun()
+    enviou = st.button("⚡ ENVIAR ⚡") or (mensagem and mensagem != st.session_state.get('last_msg', ''))
+    if enviou and mensagem.strip():
+        adicionar_mensagem(mensagem, True)
+        st.session_state['last_msg'] = mensagem
+        st.session_state['input_key'] += 1
+        time.sleep(0.1)
+        st.rerun()
 
 # Botão limpar
 col1, col2, col3 = st.columns([1,2,1])
 with col2:
     if st.button("🗑️ Limpar Mensagens"):
         if limpar_mensagens():
+            mensagens_container.empty()
             st.rerun()
 
 # Thread de recebimento
@@ -253,6 +277,5 @@ if 'receiver_thread' not in st.session_state:
     st.session_state['receiver_thread'] = receiver_thread
 
 # Atualização mais lenta e controlada
-if mensagens:  # Só atualiza se houver mudanças
-    time.sleep(1)
-    st.rerun() 
+time.sleep(1)
+st.rerun() 
