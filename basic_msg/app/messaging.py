@@ -37,12 +37,9 @@ class MessageHandler:
                         data = conn.recv(1024)
                         if data:
                             msg = data.decode('utf-8')
-                            # Aceitar qualquer mensagem que não seja vazia
                             if msg.strip():
-                                self.db_manager.add_message(msg, False)
-                                # Forçar atualização imediata
-                                st.session_state['last_update'] = time.time()
                                 print(f"Received message: {msg}")
+                                self.db_manager.add_message(msg, False)
                 except Exception as e:
                     print(f"Connection error: {e}")
                     time.sleep(0.1)
