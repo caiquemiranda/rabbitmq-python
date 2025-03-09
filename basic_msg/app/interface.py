@@ -18,6 +18,8 @@ class Interface:
             st.session_state['input_key'] = 0
         if 'last_message_count' not in st.session_state:
             st.session_state['last_message_count'] = 0
+        if 'last_messages' not in st.session_state:
+            st.session_state['last_messages'] = []
     
     def setup_page(self):
         """Setup the page configuration"""
@@ -44,15 +46,18 @@ class Interface:
     def render_messages(self):
         """Render the messages area"""
         messages_container = st.empty()
-        messages = self.db_manager.load_messages()
+        current_messages = self.db_manager.load_messages()
         
-        with messages_container.container():
-            if not messages:
-                st.info("_Waiting for messages..._")
-            else:
-                with st.container():
-                    for msg in messages:
-                        st.markdown(f'<div class="terminal-text">{msg}</div>', unsafe_allow_html=True)
+        # Só atualiza se houver mudanças nas mensagens
+        if current_messages != st.session_state['last_messages']:
+            st.session_state['last_messages'] = current_messages.copy()
+            with messages_container.container():
+                if not current_messages:
+                    st.info("_Waiting for messages..._")
+                else:
+                    with st.container():
+                        for msg in current_messages:
+                            st.markdown(f'<div class="terminal-text">{msg}</div>', unsafe_allow_html=True)
         
         return messages_container
     
@@ -61,12 +66,19 @@ class Interface:
         col1, col2 = st.columns([4, 1])
         with col1:
             key = f"msg_input_{st.session_state['input_key']}"
+            # Corrigindo o problema do label usando um ID único
+            input_id = f"message_input_{key}"
+            st.markdown(
+                f'<label for="{input_id}" style="display: none;">Message Input</label>',
+                unsafe_allow_html=True
+            )
             message = st.text_input(
-                "Message",
+                "Message Input",  # Label significativo
                 value="",
                 key=key,
                 label_visibility="collapsed",
-                autocomplete="off"  # Desabilitar autocomplete
+                autocomplete="off",
+                args=(input_id,)  # Passando o ID para o input
             )
         
         with col2:
@@ -85,11 +97,16 @@ class Interface:
                 if self.db_manager.clear_messages():
                     st.session_state['session_id'] = str(int(time.time()))
                     st.session_state['input_key'] = 0
+                    st.session_state['last_messages'] = []
                     with messages_container.container():
                         st.info("_Waiting for messages..._")
                     st.rerun()
     
     def check_updates(self):
         """Check for updates and rerun if needed"""
-        time.sleep(1)  # Atualizar a cada 1 segundo
-        st.rerun() 
+        time.sleep(0.5)  # Reduzido para 500ms
+        
+        # Verifica se há mudanças no banco
+        current_messages = self.db_manager.load_messages()
+        if current_messages != st.session_state['last_messages']:
+            st.rerun() 
